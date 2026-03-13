@@ -6,6 +6,7 @@
 import { PedidoRepository } from "../domain/repositories/pedidoRepository";
 import { ProductoPedidoRepository } from "../domain/repositories/productoPedidoRepository";
 import { PagoRepository } from "../domain/repositories/pagoRepository";
+import { PagoDetalleRepository } from "../domain/repositories/pagoDetalleRepository";
 import { MetodoPagoRepository } from "../domain/repositories/metodoPagoRepository";
 import { InventoryService } from "./apis/inventoryService";
 import { ClientService } from "./apis/clientService";
@@ -21,6 +22,7 @@ import { PaymentService } from "./payment/PaymentService";
 const pedidoRepository = new PedidoRepository();
 const productoPedidoRepository = new ProductoPedidoRepository();
 const pagoRepository = new PagoRepository();
+const pagoDetalleRepository = new PagoDetalleRepository();
 const metodoPagoRepository = new MetodoPagoRepository();
 
 // Servicios de APIs externas
@@ -47,7 +49,8 @@ export const orderService = new OrderService(
   inventoryService,
   clientService,
   tableService,
-  priceCalculatorService
+  priceCalculatorService,
+  promotionService
 );
 
 export const orderQueryService = new OrderQueryService(
@@ -60,6 +63,7 @@ export const paymentService = new PaymentService(
   pedidoRepository,
   productoPedidoRepository,
   pagoRepository,
+  pagoDetalleRepository,
   metodoPagoRepository,
   tableService,
   inventoryService,

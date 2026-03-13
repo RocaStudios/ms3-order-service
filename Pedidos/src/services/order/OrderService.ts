@@ -5,6 +5,7 @@ import { InventoryService } from "../apis/inventoryService";
 import { ClientService } from "../apis/clientService";
 import { TableService } from "../apis/tableService";
 import { PriceCalculatorService } from "../priceCalculatorService";
+import { PromotionService } from "../apis/promotionService";
 import { sendOrderConfirmationEmail } from "../apis/emailService";
 import { generarReciboPDF } from "../../utils/pdfGenerator";
 import { Pedido } from "../../domain/models/pedido";
@@ -48,8 +49,9 @@ export class OrderService {
     private inventoryService: InventoryService,
     private clientService: ClientService,
     private tableService: TableService,
-    private priceCalculatorService: PriceCalculatorService
-  ) {}
+    private priceCalculatorService: PriceCalculatorService,
+    private promotionService: PromotionService
+  ) { }
 
   /**
    * Confirm order (CU035)
@@ -61,9 +63,9 @@ export class OrderService {
   ): Promise<ServiceResult> {
     const cliente = await this.clientService.getClientById(idUsuario, accessToken);
     if (!cliente) {
-      return { 
-        status: 403, 
-        message: "El usuario no está registrado como cliente" 
+      return {
+        status: 403,
+        message: "El usuario no está registrado como cliente"
       };
     }
 
@@ -75,9 +77,9 @@ export class OrderService {
     });
 
     if (!carritoPendiente) {
-      return { 
-        status: 400, 
-        message: "No hay productos disponibles para realizar pedidos" 
+      return {
+        status: 400,
+        message: "No hay productos disponibles para realizar pedidos"
       };
     }
 
@@ -86,9 +88,9 @@ export class OrderService {
     );
 
     if (productosDelPedido.length === 0) {
-      return { 
-        status: 400, 
-        message: "No hay productos disponibles para realizar pedidos" 
+      return {
+        status: 400,
+        message: "No hay productos disponibles para realizar pedidos"
       };
     }
 
@@ -152,6 +154,7 @@ export class OrderService {
             total: pedidoFinal.total,
             estado: pedidoFinal.estado,
             canalVenta: pedidoFinal.canalVenta,
+            tipoAtencion: pedidoFinal.tipoAtencion,
             fechaPedido: pedidoFinal.fechaPedido,
             direccionEntrega: pedidoFinal.direccionEntrega,
             idMesa: pedidoFinal.idMesa
@@ -184,7 +187,7 @@ export class OrderService {
         }
 
         const producto = await this.inventoryService.getProductoById(item.idProducto, accessToken);
-        
+
         if (!producto || !producto.activo) {
           throw new Error(`El producto con ID ${item.idProducto} no está disponible`);
         }
@@ -193,10 +196,32 @@ export class OrderService {
           throw new Error(`Stock insuficiente para el producto ${item.idProducto}. Stock disponible: ${producto.stockActual}`);
         }
 
+        const calculoPromocion = await this.priceCalculatorService.calcularPrecioConPromocion(
+          item.idProducto,
+          item.cantidad,
+          accessToken
+        );
+
+        // Lógica de validación de promoción (Ruta 1 ms5) solicitada
+        const promoData = await this.promotionService?.checkProductoPromocionActiva(item.idProducto, accessToken) || { hasPromotion: false, promotion: null };
+        let promocionAplicada = false;
+        let idPromocion = null;
+        let cantidadMinimaRequerida = null;
+
+        if (promoData.hasPromotion && promoData.promotion) {
+          cantidadMinimaRequerida = promoData.promotion.cantidad_minima;
+          const meetsMinimum = item.cantidad >= promoData.promotion.cantidad_minima;
+          promocionAplicada = meetsMinimum;
+          idPromocion = meetsMinimum ? promoData.promotion.id : null;
+        }
+
         productosValidados.push({
           idProducto: item.idProducto,
           cantidad: item.cantidad,
-          precioUnitario: producto.precio
+          precioUnitario: calculoPromocion.precioFinal,
+          promocionAplicada,
+          idPromocion,
+          cantidadMinimaRequerida
         });
       }
 
@@ -204,7 +229,7 @@ export class OrderService {
       if (idMesa) {
         const mesas = await this.tableService.getAllMesas(accessToken);
         const mesa = mesas.find(m => m.idMesa === idMesa);
-        
+
         if (!mesa) {
           throw new Error(`La mesa con ID ${idMesa} no existe`);
         }
@@ -221,6 +246,7 @@ export class OrderService {
         total: 0,
         estado: 'sin_confirmar',
         canalVenta: 'fisico',
+        tipoAtencion: idMesa ? 'local' : 'llevar',
         fechaPedido: new Date(),
         idMesa: idMesa
       });
@@ -230,13 +256,16 @@ export class OrderService {
 
       for (const item of productosValidados) {
         const subtotal = item.precioUnitario * item.cantidad;
-        
+
         const productoPedido = await this.productoPedidoRepository.create({
           idPedido: pedido.idPedido,
           idProducto: item.idProducto,
           cantidad: item.cantidad,
           precioUnitario: item.precioUnitario,
-          subtotal: subtotal
+          subtotal: subtotal,
+          promocionAplicada: item.promocionAplicada,
+          idPromocion: item.idPromocion,
+          cantidadMinimaRequerida: item.cantidadMinimaRequerida
         });
 
         productosCreados.push(productoPedido);
@@ -298,7 +327,7 @@ export class OrderService {
     }
 
     const pedido = await this.pedidoRepository.findById(idPedido);
-    
+
     if (!pedido) {
       throw new Error("El pedido no existe");
     }
@@ -308,13 +337,13 @@ export class OrderService {
     }
 
     const producto = await this.inventoryService.getProductoById(idProducto, accessToken);
-    
+
     if (!producto || !producto.activo) {
       throw new Error("El producto seleccionado no está disponible");
     }
 
     if (producto.stockActual < cantidad) {
-      throw new Error("El producto seleccionado está sin stock");
+      throw new Error(`Stock insuficiente para el producto ${idProducto}. Disponible: ${producto.stockActual}, solicitado: ${cantidad}`);
     }
 
     const productoExistente = await this.productoPedidoRepository.findOne({
@@ -325,17 +354,25 @@ export class OrderService {
     });
 
     let productoPedido: ProductoPedido;
-    const precioUnitario = producto.precio;
+
+    // Determinar la cantidad total final para aplicar la lógica de promociones por volumen o por unidad
+    const nuevaCantidad = productoExistente ? productoExistente.cantidad + cantidad : cantidad;
+
+    if (producto.stockActual < nuevaCantidad) {
+      throw new Error(`Stock insuficiente para el producto ${idProducto}. Disponible: ${producto.stockActual}, solicitado total: ${nuevaCantidad}`);
+    }
+
+    // Calcular el precio real que se aplica a este producto (considerando promociones y descuentos)
+    const calculoPromocion = await this.priceCalculatorService.calcularPrecioConPromocion(
+      idProducto,
+      nuevaCantidad,
+      accessToken
+    );
+    const precioUnitario = calculoPromocion.precioFinal;
 
     if (productoExistente) {
-      const nuevaCantidad = productoExistente.cantidad + cantidad;
-      
-      if (producto.stockActual < nuevaCantidad) {
-        throw new Error("El producto seleccionado está sin stock");
-      }
-
       const nuevoSubtotal = nuevaCantidad * precioUnitario;
-      
+
       await this.productoPedidoRepository.update(
         productoExistente.idProductoPedido,
         {
@@ -350,7 +387,7 @@ export class OrderService {
       ) as ProductoPedido;
     } else {
       const subtotal = cantidad * precioUnitario;
-      
+
       productoPedido = await this.productoPedidoRepository.create({
         idPedido,
         idProducto,
@@ -451,23 +488,23 @@ export class OrderService {
       const pedido = await this.pedidoRepository.findById(idPedido);
 
       if (!pedido) {
-        return { 
-          status: 404, 
-          message: 'Pedido no encontrado' 
+        return {
+          status: 404,
+          message: 'Pedido no encontrado'
         };
       }
 
       if (pedido.idUsuario !== idUsuario) {
-        return { 
-          status: 403, 
-          message: 'No tienes permiso para cancelar este pedido' 
+        return {
+          status: 403,
+          message: 'No tienes permiso para cancelar este pedido'
         };
       }
 
       if (pedido.estado !== 'sin_confirmar' && pedido.estado !== 'pendiente') {
-        return { 
-          status: 400, 
-          message: 'Solo se pueden cancelar pedidos sin confirmar o pendientes' 
+        return {
+          status: 400,
+          message: 'Solo se pueden cancelar pedidos sin confirmar o pendientes'
         };
       }
 
@@ -481,9 +518,9 @@ export class OrderService {
         data: { mensaje: 'Pedido cancelado' }
       };
     } catch (error: any) {
-      return { 
-        status: 500, 
-        message: `Error al cancelar pedido: ${error.message}` 
+      return {
+        status: 500,
+        message: `Error al cancelar pedido: ${error.message}`
       };
     }
   }
@@ -500,18 +537,18 @@ export class OrderService {
       });
 
       if (!productoPedido) {
-        return { 
-          status: 404, 
-          message: 'Producto no encontrado en el pedido' 
+        return {
+          status: 404,
+          message: 'Producto no encontrado en el pedido'
         };
       }
 
       const pedido = productoPedido.pedido;
 
       if (pedido.estado === 'entregado' || pedido.estado === 'cancelado') {
-        return { 
-          status: 400, 
-          message: 'No se pueden modificar pedidos entregados o cancelados' 
+        return {
+          status: 400,
+          message: 'No se pueden modificar pedidos entregados o cancelados'
         };
       }
 
@@ -529,9 +566,9 @@ export class OrderService {
         data: { mensaje: 'Producto eliminado exitosamente' }
       };
     } catch (error: any) {
-      return { 
-        status: 500, 
-        message: `Error al eliminar producto: ${error.message}` 
+      return {
+        status: 500,
+        message: `Error al eliminar producto: ${error.message}`
       };
     }
   }
@@ -546,16 +583,16 @@ export class OrderService {
       });
 
       if (!pedido) {
-        return { 
-          status: 404, 
-          message: 'Pedido no encontrado' 
+        return {
+          status: 404,
+          message: 'Pedido no encontrado'
         };
       }
 
       if (pedido.estado === 'entregado') {
-        return { 
-          status: 400, 
-          message: 'No se pueden eliminar pedidos ya entregados' 
+        return {
+          status: 400,
+          message: 'No se pueden eliminar pedidos ya entregados'
         };
       }
 
@@ -574,9 +611,9 @@ export class OrderService {
         data: { mensaje: 'Pedido eliminado' }
       };
     } catch (error: any) {
-      return { 
-        status: 500, 
-        message: `Error al eliminar pedido: ${error.message}` 
+      return {
+        status: 500,
+        message: `Error al eliminar pedido: ${error.message}`
       };
     }
   }

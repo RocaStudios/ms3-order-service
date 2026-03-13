@@ -1,6 +1,7 @@
 import { PedidoRepository } from "../../domain/repositories/pedidoRepository";
 import { ProductoPedidoRepository } from "../../domain/repositories/productoPedidoRepository";
 import { PagoRepository } from "../../domain/repositories/pagoRepository";
+import { PagoDetalleRepository } from "../../domain/repositories/pagoDetalleRepository";
 import { MetodoPagoRepository } from "../../domain/repositories/metodoPagoRepository";
 import { Pedido } from "../../domain/models/pedido";
 import { Pago } from "../../domain/models/pago";
@@ -20,16 +21,31 @@ import { Transaction } from "sequelize";
  * Responsibility: Process payments with transactions and validations
  */
 export class PaymentService {
+  private readonly METODOS_PERMITIDOS = new Set(["efectivo", "tarjeta", "transferencia"]);
+
   constructor(
     private pedidoRepository: PedidoRepository,
     private productoPedidoRepository: ProductoPedidoRepository,
     private pagoRepository: PagoRepository,
+    private pagoDetalleRepository: PagoDetalleRepository,
     private metodoPagoRepository: MetodoPagoRepository,
     private tableService: TableService,
     private inventoryService: InventoryService,
     private clientService: ClientService,
     private priceCalculatorService: PriceCalculatorService
   ) {}
+
+  private normalizeMetodoNombre(nombre: string): string {
+    return nombre
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  private toCents(value: number): number {
+    return Math.round(Number(value) * 100);
+  }
 
   /**
    * Register payment for order (CU39/CU40) - WITH TRANSACTION
@@ -38,7 +54,11 @@ export class PaymentService {
   async registerPayment(
     idPedido: number,
     idUsuario: number,
-    idMetodoPago: number,
+    paymentInput: {
+      idMetodoPago?: number;
+      metodos?: Array<{ idMetodoPago: number; monto: number }>;
+      montoRecibidoEfectivo?: number;
+    },
     direccionEntrega?: string,
     accessToken?: string
   ): Promise<ServiceResult> {
@@ -71,13 +91,51 @@ export class PaymentService {
         };
       }
 
-      const metodoPago = await this.metodoPagoRepository.findById(idMetodoPago);
-      if (!metodoPago) {
+      const paymentLinesInput = Array.isArray(paymentInput.metodos) && paymentInput.metodos.length > 0
+        ? paymentInput.metodos
+        : (paymentInput.idMetodoPago
+          ? [{ idMetodoPago: Number(paymentInput.idMetodoPago), monto: 0 }]
+          : []);
+
+      if (paymentLinesInput.length === 0) {
         await transaction.rollback();
-        return { 
-          status: 400, 
-          message: "Método de pago no válido" 
+        return {
+          status: 400,
+          message: "Debe proporcionar al menos un método de pago"
         };
+      }
+
+      for (const linea of paymentLinesInput) {
+        if (!linea.idMetodoPago || !Number.isInteger(Number(linea.idMetodoPago))) {
+          await transaction.rollback();
+          return {
+            status: 400,
+            message: "Cada método debe incluir un idMetodoPago válido"
+          };
+        }
+      }
+
+      const metodosPagoPorId = new Map<number, MetodoPago>();
+      for (const linea of paymentLinesInput) {
+        const metodo = await this.metodoPagoRepository.findById(Number(linea.idMetodoPago));
+        if (!metodo) {
+          await transaction.rollback();
+          return {
+            status: 400,
+            message: `Método de pago no válido para id ${linea.idMetodoPago}`
+          };
+        }
+
+        const metodoNormalizado = this.normalizeMetodoNombre(metodo.nombre);
+        if (!this.METODOS_PERMITIDOS.has(metodoNormalizado)) {
+          await transaction.rollback();
+          return {
+            status: 400,
+            message: `Método de pago no permitido: ${metodo.nombre}. Permitidos: efectivo, tarjeta, transferencia`
+          };
+        }
+
+        metodosPagoPorId.set(Number(linea.idMetodoPago), metodo);
       }
 
       const productos = await this.productoPedidoRepository.findByPedido(idPedido);
@@ -113,6 +171,67 @@ export class PaymentService {
         }
       }
       totalConPromociones = Number(totalConPromociones.toFixed(2));
+
+      const normalizedPaymentLines = paymentLinesInput.map((linea) => ({
+        idMetodoPago: Number(linea.idMetodoPago),
+        monto: Number(linea.monto || 0)
+      }));
+
+      const isLegacyPayload = !!paymentInput.idMetodoPago && (!paymentInput.metodos || paymentInput.metodos.length === 0);
+      if (isLegacyPayload) {
+        normalizedPaymentLines[0].monto = totalConPromociones;
+      }
+
+      for (const linea of normalizedPaymentLines) {
+        if (linea.monto <= 0) {
+          await transaction.rollback();
+          return {
+            status: 400,
+            message: `El monto para el método ${linea.idMetodoPago} debe ser mayor a 0`
+          };
+        }
+      }
+
+      const totalMetodos = normalizedPaymentLines.reduce((acc, item) => acc + this.toCents(item.monto), 0);
+      const totalPedidoCentavos = this.toCents(totalConPromociones);
+
+      if (totalMetodos !== totalPedidoCentavos) {
+        await transaction.rollback();
+        return {
+          status: 400,
+          message: `La suma de los métodos (${(totalMetodos / 100).toFixed(2)}) debe ser igual al total del pedido (${(totalPedidoCentavos / 100).toFixed(2)})`
+        };
+      }
+
+      const montoEfectivoAsignado = normalizedPaymentLines.reduce((acc, linea) => {
+        const nombreMetodo = metodosPagoPorId.get(linea.idMetodoPago)?.nombre || '';
+        const esEfectivo = this.normalizeMetodoNombre(nombreMetodo) === 'efectivo';
+        return esEfectivo ? acc + Number(linea.monto) : acc;
+      }, 0);
+
+      let montoRecibidoEfectivo: number | null = null;
+      let vuelto = 0;
+
+      if (montoEfectivoAsignado > 0 && paymentInput.montoRecibidoEfectivo !== undefined) {
+        montoRecibidoEfectivo = Number(paymentInput.montoRecibidoEfectivo);
+        if (Number.isNaN(montoRecibidoEfectivo) || montoRecibidoEfectivo <= 0) {
+          await transaction.rollback();
+          return {
+            status: 400,
+            message: 'montoRecibidoEfectivo debe ser un número mayor a 0'
+          };
+        }
+
+        if (this.toCents(montoRecibidoEfectivo) < this.toCents(montoEfectivoAsignado)) {
+          await transaction.rollback();
+          return {
+            status: 400,
+            message: `El monto recibido en efectivo ($${montoRecibidoEfectivo.toFixed(2)}) no cubre el monto en efectivo del pago ($${montoEfectivoAsignado.toFixed(2)})`
+          };
+        }
+
+        vuelto = Number((montoRecibidoEfectivo - montoEfectivoAsignado).toFixed(2));
+      }
 
       let direccionFinal = direccionEntrega || pedido.direccionEntrega || '';
 
@@ -160,11 +279,19 @@ export class PaymentService {
       // Register payment
       const pago = await this.pagoRepository.create({
         idPedido,
-        idMetodoPago,
+        idMetodoPago: normalizedPaymentLines[0].idMetodoPago,
         monto: totalConPromociones,
         fechaPago: new Date(),
         urlComprobante: ''
       });
+
+      for (const linea of normalizedPaymentLines) {
+        await this.pagoDetalleRepository.create({
+          idPago: pago.idPago,
+          idMetodoPago: linea.idMetodoPago,
+          monto: Number(linea.monto.toFixed(2))
+        });
+      }
 
       // Update order to 'pendiente'
       await this.pedidoRepository.update(idPedido, {
@@ -191,11 +318,34 @@ export class PaymentService {
         }
       }
 
+      const productIds = [...new Set(productos.map((p) => p.idProducto))];
+      const productNamesById = new Map<number, string>();
+      try {
+        const productResults = await Promise.all(
+          productIds.map(async (idProducto) => {
+            const product = await this.inventoryService.getProductoById(idProducto, accessToken);
+            return { idProducto, nombre: product?.nombre || `Producto ${idProducto}` };
+          })
+        );
+
+        productResults.forEach((item) => productNamesById.set(item.idProducto, item.nombre));
+      } catch (error) {
+        console.error("Error al obtener nombres de productos para recibo:", error);
+      }
+
       try {
         rutaPDF = await generarReciboPDF({
           pedido: pedidoActualizado,
           productos: productos,
-          nombreMesa: nombreMesa
+          nombreMesa: nombreMesa,
+          nombresProductos: productNamesById,
+          metodosPago: normalizedPaymentLines.map((linea) => ({
+            nombreMetodo: metodosPagoPorId.get(linea.idMetodoPago)?.nombre || `Método ${linea.idMetodoPago}`,
+            monto: Number(linea.monto.toFixed(2))
+          })),
+          totalFinal: totalConPromociones,
+          montoRecibidoEfectivo: montoRecibidoEfectivo ?? undefined,
+          vuelto: vuelto > 0 ? vuelto : undefined
         });
 
         await this.pagoRepository.update(pago.idPago, {
@@ -225,6 +375,7 @@ export class PaymentService {
               total: pedidoActualizado.total,
               estado: pedidoActualizado.estado,
               canalVenta: pedidoActualizado.canalVenta,
+              tipoAtencion: pedidoActualizado.tipoAtencion,
               fechaPedido: pedidoActualizado.fechaPedido,
               idMesa: pedidoActualizado.idMesa
             },
@@ -234,7 +385,14 @@ export class PaymentService {
               monto: pagoFinal.monto,
               fechaPago: pagoFinal.fechaPago,
               idPedido: pagoFinal.idPedido,
-              idMetodoPago: pagoFinal.idMetodoPago
+              idMetodoPago: pagoFinal.idMetodoPago,
+              detalles: normalizedPaymentLines.map((linea) => ({
+                idMetodoPago: linea.idMetodoPago,
+                nombre: metodosPagoPorId.get(linea.idMetodoPago)?.nombre || `Método ${linea.idMetodoPago}`,
+                monto: Number(linea.monto.toFixed(2))
+              })),
+              montoRecibidoEfectivo: montoRecibidoEfectivo ?? undefined,
+              vuelto: vuelto > 0 ? vuelto : undefined
             },
             rutaPDF
           }
@@ -282,18 +440,11 @@ export class PaymentService {
     limit: number = 20
   ): Promise<{ pagos: Pago[]; total: number }> {
     const offset = (page - 1) * limit;
+    const pagos = await this.pagoRepository.findAllWithRelations({}, {});
+    const total = pagos.length;
+    const paginatedPagos = pagos.slice(offset, offset + limit);
 
-    const { rows: pagos, count: total } = await this.pagoRepository.findAndCountAll({
-      include: [
-        { model: Pedido, as: 'pedido' },
-        { model: MetodoPago, as: 'metodoPago' }
-      ],
-      order: [['fechaPago', 'DESC']],
-      limit,
-      offset
-    });
-
-    return { pagos, total };
+    return { pagos: paginatedPagos, total };
   }
 
   /**
@@ -386,7 +537,9 @@ export class PaymentService {
       where: { idMetodoPago: idMetodo }
     });
 
-    if (pagosConMetodo.length > 0) {
+    const detallesConMetodo = await this.pagoDetalleRepository.existsByMetodoPago(idMetodo);
+
+    if (pagosConMetodo.length > 0 || detallesConMetodo) {
       return {
         status: 400,
         message: "No se puede eliminar el método de pago porque tiene pagos asociados"
@@ -434,10 +587,6 @@ export class PaymentService {
       };
     }
 
-    if (filtros.idMetodoPago) {
-      whereClausePago.idMetodoPago = filtros.idMetodoPago;
-    }
-
     if (filtros.estado) {
       whereClausePedido.estado = filtros.estado;
     }
@@ -447,8 +596,12 @@ export class PaymentService {
     const pagos = await this.pagoRepository.findAllWithRelations(whereClausePago, whereClausePedido);
     
     // Manual pagination since findAllWithRelations doesn't support limit/offset directly
-    const total = pagos.length;
-    const paginatedPagos = pagos.slice(offset, offset + limit);
+    const pagosFiltrados = filtros.idMetodoPago
+      ? pagos.filter((pago) => (pago.detalles || []).some((detalle) => detalle.idMetodoPago === filtros.idMetodoPago))
+      : pagos;
+
+    const total = pagosFiltrados.length;
+    const paginatedPagos = pagosFiltrados.slice(offset, offset + limit);
 
     return { pagos: paginatedPagos, total };
   }

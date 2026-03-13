@@ -65,40 +65,49 @@ export class PriceCalculatorService {
     accessToken?: string
   ): Promise<PriceCalculationResult> {
     let precioOriginal = 0;
-    
+
     try {
       // 1. Obtener el producto del inventario para obtener el precio original
       const producto = await this.inventoryService.getProductoById(idProducto, accessToken);
-      
+
       if (!producto) {
         throw new Error(`Producto con ID ${idProducto} no encontrado en inventario`);
       }
 
       precioOriginal = producto.precio;
 
-      // 2. Obtener promociones del producto
-      const promocionesData = await this.promotionService.getPromocionesDeProducto(idProducto, accessToken);
+      // 2. Obtener promociones del producto usando el nuevo endpoint check-active
+      const promoData = await this.promotionService.checkProductoPromocionActiva(idProducto, accessToken);
 
-      // 3. Si no hay promociones, retornar precio original
-      if (!promocionesData || !promocionesData.promociones || promocionesData.promociones.length === 0) {
-        return this.buildResultSinPromocion(precioOriginal);
-      }
+      // 3. Evaluar si la promoción aplica según la cantidad
+      if (promoData.hasPromotion && promoData.promotion) {
+        const promo = promoData.promotion;
 
-      // 4. Calcular mejor promoción aplicable
-      const mejorPromocion = this.seleccionarMejorPromocion(
-        promocionesData.promociones,
-        precioOriginal,
-        cantidad
-      );
+        // Verifica si alcanza la cantidad mínima para que aplique
+        if (cantidad >= promo.cantidad_minima) {
+          // calcular el descuento: 
+          // nota: 'valor' ya trae el descuento en % o el precio fijo final dependiendo del tipo (determinado por MS5)
 
-      // 5. Si se encontró una promoción válida, aplicarla
-      if (mejorPromocion) {
-        return this.buildResultConPromocion(
-          precioOriginal,
-          mejorPromocion.precioFinal,
-          mejorPromocion.descuentoCalculado,
-          mejorPromocion.promocion
-        );
+          let precioFinal = precioOriginal;
+          let descuentoCalculado = 0;
+
+          // Asumimos que si tipo == 'Fijo' entonces 'valor' es el nuevo precio
+          // Si tipo == 'Porcentaje', entonces 'valor' es el porcentaje a descontar
+          if (promo.tipo === 'Fijo' || promo.tipo === 'Monto') {
+            precioFinal = promo.valor;
+            descuentoCalculado = ((precioOriginal - precioFinal) / precioOriginal) * 100;
+          } else {
+            descuentoCalculado = promo.valor;
+            precioFinal = precioOriginal * (1 - descuentoCalculado / 100);
+          }
+
+          return this.buildResultConPromocion(
+            precioOriginal,
+            precioFinal,
+            descuentoCalculado,
+            promo
+          );
+        }
       }
 
       // 6. Si ninguna promoción aplicó
@@ -110,92 +119,6 @@ export class PriceCalculatorService {
     }
   }
 
-  /**
-   * Seleccionar la mejor promoción aplicable de una lista
-   * @param promociones Lista de promociones del producto
-   * @param precioOriginal Precio original del producto
-   * @param cantidad Cantidad solicitada
-   * @returns Mejor promoción con precio calculado o null
-   */
-  private seleccionarMejorPromocion(
-    promociones: ProductoPromocionConDetalle[],
-    precioOriginal: number,
-    cantidad: number
-  ): { promocion: ProductoPromocionConDetalle; precioFinal: number; descuentoCalculado: number } | null {
-    const ahora = new Date();
-    let mejorPromocion: ProductoPromocionConDetalle | null = null;
-    let mayorDescuento = 0;
-    let precioConDescuento = precioOriginal;
-
-    for (const productoPromocion of promociones) {
-      const detallePromocion = productoPromocion.detallePromocion;
-
-      // Validar que la promoción esté activa
-      if (!this.esPromocionValida(detallePromocion, ahora)) continue;
-
-      // Validar cantidad mínima
-      if (cantidad < productoPromocion.cantidadMinima) continue;
-
-      // Calcular precio con descuento
-      const resultado = this.calcularDescuento(productoPromocion, precioOriginal);
-
-      // Guardar la mejor promoción (mayor descuento)
-      if (resultado.descuentoCalculado > mayorDescuento) {
-        mayorDescuento = resultado.descuentoCalculado;
-        precioConDescuento = resultado.precioFinal;
-        mejorPromocion = productoPromocion;
-      }
-    }
-
-    if (mejorPromocion) {
-      return {
-        promocion: mejorPromocion,
-        precioFinal: precioConDescuento,
-        descuentoCalculado: mayorDescuento,
-      };
-    }
-
-    return null;
-  }
-
-  /**
-   * Validar si una promoción está activa y dentro del rango de fechas
-   */
-  private esPromocionValida(detallePromocion: PromocionDto, fechaActual: Date): boolean {
-    if (!detallePromocion || !detallePromocion.activo) return false;
-
-    const fechaInicio = new Date(detallePromocion.fechaInicio);
-    const fechaFin = new Date(detallePromocion.fechaFin);
-
-    return fechaActual >= fechaInicio && fechaActual <= fechaFin;
-  }
-
-  /**
-   * Calcular el descuento según el tipo de promoción
-   */
-  private calcularDescuento(
-    productoPromocion: ProductoPromocionConDetalle,
-    precioOriginal: number
-  ): { precioFinal: number; descuentoCalculado: number } {
-    let descuentoCalculado = 0;
-    let precioFinal = precioOriginal;
-
-    // Precio fijo promocional tiene prioridad
-    if (productoPromocion.precioPromocional !== null && productoPromocion.precioPromocional !== undefined) {
-      precioFinal = productoPromocion.precioPromocional;
-      descuentoCalculado = ((precioOriginal - precioFinal) / precioOriginal) * 100;
-    } 
-    // Porcentaje de descuento
-    else if (productoPromocion.porcentajeDescuento !== null && productoPromocion.porcentajeDescuento !== undefined) {
-      descuentoCalculado = productoPromocion.porcentajeDescuento;
-      precioFinal = precioOriginal * (1 - descuentoCalculado / 100);
-    }
-
-    return {
-      precioFinal: Number(precioFinal.toFixed(2)),
-      descuentoCalculado: Number(descuentoCalculado.toFixed(2)),
-    };
-  }
 
   /**
    * Construir resultado sin promoción

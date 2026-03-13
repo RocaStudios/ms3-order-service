@@ -42,6 +42,25 @@ export class ProductoPedido extends Model {
     })
     idProducto!: number;
 
+    @Column({
+        type: DataType.BOOLEAN,
+        allowNull: true,
+        defaultValue: false
+    })
+    promocionAplicada!: boolean;
+
+    @Column({
+        type: DataType.INTEGER,
+        allowNull: true
+    })
+    idPromocion!: number | null;
+
+    @Column({
+        type: DataType.INTEGER,
+        allowNull: true
+    })
+    cantidadMinimaRequerida!: number | null;
+
     @ForeignKey(() => Pedido)
     @Column(DataType.INTEGER)
     idPedido!: number;

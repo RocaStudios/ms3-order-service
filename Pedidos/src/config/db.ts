@@ -3,7 +3,7 @@ import { Sequelize } from "sequelize-typescript";
 
 //Importacion de modelos
 import {
-   MetodoPago, Pago, Pedido, ProductoPedido
+  MetodoPago, Pago, PagoDetalle, Pedido, ProductoPedido
 } from "../domain/models"
 
 //Importar credenciales
@@ -53,7 +53,7 @@ export async function initializeDB() {
     password: DB_PASSWORD,
     database: DB_NAME,
     models: [
-      MetodoPago, Pago, Pedido, ProductoPedido
+      MetodoPago, Pago, PagoDetalle, Pedido, ProductoPedido
     ],
     logging: false, // Desactiva logs de SQL en producción
   });

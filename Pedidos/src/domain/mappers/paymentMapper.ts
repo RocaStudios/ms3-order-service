@@ -9,7 +9,12 @@ export class PaymentMapper {
       monto: payment.monto,
       fechaPago: payment.fechaPago,
       idPedido: payment.idPedido,
-      idMetodoPago: payment.idMetodoPago
+      idMetodoPago: payment.idMetodoPago,
+      detalles: (payment.detalles || []).map(detalle => ({
+        idMetodoPago: detalle.idMetodoPago,
+        nombre: detalle.metodoPago?.nombre,
+        monto: Number(detalle.monto)
+      }))
     };
   }
 
@@ -28,6 +33,7 @@ export class PaymentMapper {
         fechaPedido: payment.pedido.fechaPedido,
         direccionEntrega: payment.pedido.direccionEntrega,
         canalVenta: payment.pedido.canalVenta,
+        tipoAtencion: payment.pedido.tipoAtencion as 'local' | 'llevar' | undefined,
         idMesa: payment.pedido.idMesa
       } : undefined
     };
@@ -47,7 +53,8 @@ export class PaymentMapper {
         fechaPedido: payment.pedido.fechaPedido,
         direccionEntrega: payment.pedido.direccionEntrega,
         idUsuario: payment.pedido.idUsuario,
-        canalVenta: payment.pedido.canalVenta
+        canalVenta: payment.pedido.canalVenta,
+        tipoAtencion: payment.pedido.tipoAtencion as 'local' | 'llevar' | undefined
       } : undefined
     };
   }

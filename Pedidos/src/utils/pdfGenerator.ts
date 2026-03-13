@@ -8,6 +8,14 @@ export interface ReciboPedidoData {
   pedido: Pedido;
   productos: ProductoPedido[];
   nombreMesa?: string;
+  nombresProductos?: Map<number, string>;
+  metodosPago?: Array<{
+    nombreMetodo: string;
+    monto: number;
+  }>;
+  totalFinal?: number;
+  montoRecibidoEfectivo?: number;
+  vuelto?: number;
 }
 
 /**
@@ -79,7 +87,7 @@ export const generarReciboPDF = async (data: ReciboPedidoData): Promise<string> 
       doc
         .fontSize(12)
         .font('Helvetica-Bold')
-        .text('Producto', 50, doc.y, { width: 200, continued: true })
+        .text('Producto', 50, doc.y, { width: 220, continued: true })
         .text('Cant.', { width: 60, continued: true })
         .text('P. Unit.', { width: 80, continued: true })
         .text('Subtotal', { width: 80, align: 'right' })
@@ -89,16 +97,37 @@ export const generarReciboPDF = async (data: ReciboPedidoData): Promise<string> 
       // Productos
       data.productos.forEach((producto) => {
         const yPos = doc.y;
+        const nombreProducto = data.nombresProductos?.get(producto.idProducto) || `Producto ${producto.idProducto}`;
+        const tituloProducto = `ID: ${producto.idProducto} - ${nombreProducto}`;
         
         doc
           .fontSize(10)
-          .text(`ID: ${producto.idProducto}`, 50, yPos, { width: 200 })
-          .text(`${producto.cantidad}`, 250, yPos, { width: 60 })
-          .text(`$${Number(producto.precioUnitario).toFixed(2)}`, 310, yPos, { width: 80 })
-          .text(`$${Number(producto.subtotal).toFixed(2)}`, 390, yPos, { width: 80, align: 'right' });
+          .text(tituloProducto, 50, yPos, { width: 220 })
+          .text(`${producto.cantidad}`, 270, yPos, { width: 60 })
+          .text(`$${Number(producto.precioUnitario).toFixed(2)}`, 330, yPos, { width: 80 })
+          .text(`$${Number(producto.subtotal).toFixed(2)}`, 410, yPos, { width: 80, align: 'right' });
 
         doc.moveDown(0.5);
       });
+
+      if (data.metodosPago && data.metodosPago.length > 0) {
+        doc
+          .moveDown(0.5)
+          .fontSize(12)
+          .font('Helvetica-Bold')
+          .text('Desglose de pago por método', { align: 'left' })
+          .font('Helvetica')
+          .moveDown(0.4);
+
+        data.metodosPago.forEach((metodo) => {
+          doc
+            .fontSize(10)
+            .text(`${metodo.nombreMetodo}`, 50, doc.y, { width: 320, continued: true })
+            .text(`$${Number(metodo.monto).toFixed(2)}`, { width: 120, align: 'right' });
+        });
+
+        doc.moveDown(0.5);
+      }
 
       // Línea separadora
       doc
@@ -111,9 +140,25 @@ export const generarReciboPDF = async (data: ReciboPedidoData): Promise<string> 
       doc
         .fontSize(14)
         .font('Helvetica-Bold')
-        .text(`TOTAL: $${Number(data.pedido.total).toFixed(2)}`, { align: 'right' })
+        .text(`TOTAL: $${Number(data.totalFinal ?? data.pedido.total).toFixed(2)}`, { align: 'right' })
         .font('Helvetica')
-        .moveDown(2);
+        .moveDown(0.8);
+
+      if (data.montoRecibidoEfectivo !== undefined) {
+        doc
+          .fontSize(11)
+          .text(`Efectivo recibido: $${Number(data.montoRecibidoEfectivo).toFixed(2)}`, { align: 'right' });
+      }
+
+      if (data.vuelto !== undefined && Number(data.vuelto) > 0) {
+        doc
+          .fontSize(12)
+          .font('Helvetica-Bold')
+          .text(`VUELTO: $${Number(data.vuelto).toFixed(2)}`, { align: 'right' })
+          .font('Helvetica');
+      }
+
+      doc.moveDown(1.4);
 
       // Pie de página
       doc

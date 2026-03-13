@@ -5,12 +5,24 @@ import { OrderMapper } from "../domain/mappers/orderMapper";
 import { extractToken } from "../utils/tokenExtractor";
 import { PaginationMetaDto } from "../domain/dtos/response/PaginatedResponseDto";
 import { ApiResponse } from "../types";
+import { AppError } from "../middlewares/error.middleware";
 
 /**
  * OrderController - Handles HTTP requests for orders
  * Uses service instances, validators, and mappers for clean separation
  */
 export class OrderController {
+
+  private isBusinessValidationError(message?: string): boolean {
+    if (!message) return false;
+
+    const normalizedMessage = message.toLowerCase();
+    return normalizedMessage.includes("stock")
+      || normalizedMessage.includes("cantidad")
+      || normalizedMessage.includes("no existe")
+      || normalizedMessage.includes("no está disponible")
+      || normalizedMessage.includes("no se pueden agregar productos");
+  }
 
   /**
    * CU022 - Add product to cart
@@ -47,6 +59,11 @@ export class OrderController {
 
       res.status(resultado.status).json(response);
     } catch (error: any) {
+      if (this.isBusinessValidationError(error?.message)) {
+        next(new AppError(error.message, 400));
+        return;
+      }
+
       next(error);
     }
   };
@@ -87,6 +104,11 @@ export class OrderController {
 
       res.status(200).json(response);
     } catch (error: any) {
+      if (this.isBusinessValidationError(error?.message)) {
+        next(new AppError(error.message, 400));
+        return;
+      }
+
       next(error);
     }
   };

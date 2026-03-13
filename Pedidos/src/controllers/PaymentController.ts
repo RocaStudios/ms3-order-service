@@ -38,6 +38,7 @@ export class PaymentController {
           total: p.total,
           estado: p.estado,
           canalVenta: p.canalVenta,
+          tipoAtencion: p.tipoAtencion,
           fechaPedido: p.fechaPedido,
           direccionEntrega: p.direccionEntrega
         })),
@@ -58,25 +59,68 @@ export class PaymentController {
    */
   registerPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { idMetodoPago, direccionEntrega } = req.body;
+      const { idMetodoPago, metodos, direccionEntrega, montoRecibidoEfectivo } = req.body;
       const idPedido = OrderValidator.validateIntegerId(req.params.idPedido, "ID de pedido", res);
       if (!idPedido) return;
 
       const idUsuario = req.user!.id;
 
-      if (!OrderValidator.validateRequiredFields({ idMetodoPago }, ['idMetodoPago'], res)) {
+      const hasLegacy = idMetodoPago !== undefined && idMetodoPago !== null;
+      const hasMixed = Array.isArray(metodos) && metodos.length > 0;
+
+      if (!hasLegacy && !hasMixed) {
+        res.status(400).json({
+          success: false,
+          message: "Debe proporcionar idMetodoPago (legacy) o metodos[] (mixto)"
+        });
         return;
       }
 
-      if (!OrderValidator.validateIntegerFields({ idMetodoPago }, ['idMetodoPago'], res)) {
-        return;
+      if (hasLegacy) {
+        if (!OrderValidator.validateIntegerFields({ idMetodoPago }, ['idMetodoPago'], res)) {
+          return;
+        }
+      }
+
+      if (hasMixed) {
+        for (const metodo of metodos) {
+          if (!OrderValidator.validateRequiredFields(metodo, ['idMetodoPago', 'monto'], res)) {
+            return;
+          }
+
+          if (!OrderValidator.validateIntegerFields(metodo, ['idMetodoPago'], res)) {
+            return;
+          }
+
+          if (typeof metodo.monto !== 'number' || metodo.monto <= 0) {
+            res.status(400).json({
+              success: false,
+              message: "Cada línea de metodos debe tener un monto mayor a 0"
+            });
+            return;
+          }
+        }
+      }
+
+      if (montoRecibidoEfectivo !== undefined) {
+        if (typeof montoRecibidoEfectivo !== 'number' || montoRecibidoEfectivo <= 0) {
+          res.status(400).json({
+            success: false,
+            message: "montoRecibidoEfectivo debe ser un número mayor a 0"
+          });
+          return;
+        }
       }
 
       const accessToken = extractToken(req);
       const resultado = await paymentService.registerPayment(
         idPedido,
         idUsuario,
-        idMetodoPago,
+        {
+          idMetodoPago,
+          metodos,
+          montoRecibidoEfectivo
+        },
         direccionEntrega,
         accessToken
       );

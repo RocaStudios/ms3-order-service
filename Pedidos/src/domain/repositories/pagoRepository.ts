@@ -1,5 +1,5 @@
 import { BaseRepository } from "./baseRepository";
-import { Pago, Pedido, MetodoPago } from "../models";
+import { Pago, Pedido, MetodoPago, PagoDetalle } from "../models";
 
 export class PagoRepository extends BaseRepository<Pago> {
     constructor() {
@@ -22,6 +22,14 @@ export class PagoRepository extends BaseRepository<Pago> {
                 {
                     model: MetodoPago,
                     as: 'metodoPago'
+                },
+                {
+                    model: PagoDetalle,
+                    as: 'detalles',
+                    include: [{
+                        model: MetodoPago,
+                        as: 'metodoPago'
+                    }]
                 }
             ],
             order: [['fechaPago', 'DESC']]
@@ -39,6 +47,14 @@ export class PagoRepository extends BaseRepository<Pago> {
                 {
                     model: MetodoPago,
                     as: 'metodoPago'
+                },
+                {
+                    model: PagoDetalle,
+                    as: 'detalles',
+                    include: [{
+                        model: MetodoPago,
+                        as: 'metodoPago'
+                    }]
                 }
             ]
         });

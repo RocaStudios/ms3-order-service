@@ -5,6 +5,13 @@ export interface PaymentResponseDto {
   fechaPago: Date;
   idPedido: number;
   idMetodoPago: number;
+  detalles?: PaymentMethodSplitDto[];
+}
+
+export interface PaymentMethodSplitDto {
+  idMetodoPago: number;
+  nombre?: string;
+  monto: number;
 }
 
 export interface PaymentWithDetailsResponseDto extends PaymentResponseDto {
@@ -20,6 +27,7 @@ export interface PaymentWithDetailsResponseDto extends PaymentResponseDto {
     fechaPedido: Date;
     direccionEntrega?: string;
     canalVenta: string;
+    tipoAtencion?: 'local' | 'llevar';
     idMesa?: number;
   };
 }

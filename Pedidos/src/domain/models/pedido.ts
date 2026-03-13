@@ -32,6 +32,13 @@ export class Pedido extends Model {
     })
     canalVenta!: string;
 
+    @AllowNull(true)
+    @Column({
+        type: DataType.ENUM('local', 'llevar'),
+        allowNull: true
+    })
+    tipoAtencion?: string;
+
     @Column({
         type: DataType.ENUM('sin_confirmar', 'pendiente', 'entregado', 'cancelado'),
         allowNull: false

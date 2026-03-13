@@ -6,10 +6,12 @@ import {
     PrimaryKey,
     AutoIncrement,
     ForeignKey,
-    BelongsTo
+    BelongsTo,
+    HasMany
 } from "sequelize-typescript";
 import { Pedido } from "./pedido";
 import { MetodoPago } from "./metodoPago";
+import { PagoDetalle } from "./pagoDetalle";
 
 @Table({ tableName: "pago", timestamps: false })
 export class Pago extends Model {
@@ -49,4 +51,7 @@ export class Pago extends Model {
 
     @BelongsTo(() => MetodoPago)
     metodoPago!: MetodoPago;
+
+    @HasMany(() => PagoDetalle)
+    detalles!: PagoDetalle[];
 }

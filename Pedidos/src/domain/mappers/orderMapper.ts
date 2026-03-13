@@ -10,6 +10,7 @@ export class OrderMapper {
       total: order.total,
       estado: order.estado,
       canalVenta: order.canalVenta,
+      tipoAtencion: order.tipoAtencion as 'local' | 'llevar' | undefined,
       fechaPedido: order.fechaPedido,
       direccionEntrega: order.direccionEntrega,
       idMesa: order.idMesa

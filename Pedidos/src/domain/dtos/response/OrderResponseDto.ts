@@ -4,6 +4,7 @@ export interface OrderResponseDto {
   total: number;
   estado: string;
   canalVenta: string;
+  tipoAtencion?: 'local' | 'llevar';
   fechaPedido: Date;
   direccionEntrega?: string;
   idMesa?: number;

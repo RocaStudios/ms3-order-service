@@ -4,8 +4,10 @@ import {
     Model,
     DataType,
     PrimaryKey,
-    AutoIncrement
+    AutoIncrement,
+    HasMany
 } from "sequelize-typescript";
+import { PagoDetalle } from "./pagoDetalle";
 
 @Table({ tableName: "metodoPago", timestamps: false })
 export class MetodoPago extends Model {
@@ -19,4 +21,7 @@ export class MetodoPago extends Model {
         allowNull: false
     })
     nombre!: string;
+
+    @HasMany(() => PagoDetalle)
+    detallesPago!: PagoDetalle[];
 }

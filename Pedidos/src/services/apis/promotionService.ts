@@ -55,7 +55,7 @@ export class PromotionService {
     }
     try {
       const response = await this.axiosInstance.get(
-        `/productos-promocion/producto/${idProducto}/promociones`, 
+        `/productos-promocion/producto/${idProducto}/promociones`,
         { headers }
       );
       return response.data?.data ?? response.data ?? null;
@@ -66,6 +66,29 @@ export class PromotionService {
       }
       console.error(`Error al obtener promociones del producto ${idProducto}:`, error.message);
       return null;
+    }
+  }
+
+  /**
+   * Verificar si un producto tiene promoción activa para aplicar en pedido
+   * @param idProducto ID del producto
+   * @param accessToken Token de autenticación del usuario
+   * @returns Datos de validación de promoción
+   */
+  async checkProductoPromocionActiva(idProducto: number, accessToken?: string): Promise<any> {
+    const headers: any = { ...this.axiosInstance.defaults.headers.common };
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    try {
+      const response = await this.axiosInstance.get(
+        `/producto-promocion/check-active/${idProducto}`,
+        { headers }
+      );
+      return response.data?.data ?? response.data ?? { hasPromotion: false, promotion: null };
+    } catch (error: any) {
+      console.error(`Error al verificar promoción activa para el producto ${idProducto}:`, error.message);
+      return { hasPromotion: false, promotion: null };
     }
   }
 
