@@ -346,6 +346,15 @@ export class OrderService {
     }
 
     if (producto.stockActual < cantidad) {
+      // VALIDACIÓN ADICIONAL: Asegurar que stockActual es válido
+      if (typeof producto.stockActual !== 'number' || producto.stockActual < 0) {
+        console.error(
+          `[OrderService] ⚠️ Stock inválido detectado para producto ${idProducto}:`,
+          { stockActual: producto.stockActual, tipo: typeof producto.stockActual }
+        );
+        throw new Error(`No se pudo validar el stock para el producto ${idProducto}. Stock: ${producto.stockActual}`);
+      }
+      
       throw new Error(`Stock insuficiente para el producto ${idProducto}. Disponible: ${producto.stockActual}, solicitado: ${cantidad}`);
     }
 
@@ -362,7 +371,10 @@ export class OrderService {
     const nuevaCantidad = productoExistente ? productoExistente.cantidad + cantidad : cantidad;
 
     if (producto.stockActual < nuevaCantidad) {
-      throw new Error(`Stock insuficiente para el producto ${idProducto}. Disponible: ${producto.stockActual}, solicitado total: ${nuevaCantidad}`);
+      throw new Error(
+        `Stock insuficiente para el producto ${idProducto}. ` +
+        `Disponible: ${producto.stockActual}, solicitado total: ${nuevaCantidad}`
+      );
     }
 
     // Calcular el precio real que se aplica a este producto (considerando promociones y descuentos)

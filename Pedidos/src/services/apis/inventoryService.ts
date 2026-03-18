@@ -5,9 +5,6 @@ import { Request, Response } from 'express';
  * Realiza llamadas HTTP al microservicio de inventario para obtener y gestionar productos
  */
 
-
-
-
 export class InventoryService {
   private axiosInstance: AxiosInstance;
   private inventoryBaseUrl: string;
@@ -15,20 +12,14 @@ export class InventoryService {
 
   constructor() {
     this.inventoryBaseUrl = process.env.INVENTORY_SERVICE_URL || 'http://inventory-service-app:4001/api';
-    //this.internalToken = process.env.INTERNAL_SERVICE_TOKEN;
 
     const headers: any = {
       'Content-Type': 'application/json',
     };
 
-    // Solo agregar x-internal-token si está configurado
-    // if (this.internalToken) {
-    //   headers['x-internal-token'] = this.internalToken;
-    // }
-
     this.axiosInstance = axios.create({
       baseURL: this.inventoryBaseUrl,
-      timeout: 10000, // 10 segundos
+      timeout: 15000, // Aumentado de 10s a 15s para mejor confiabilidad
       headers,
     });
   }
@@ -50,18 +41,67 @@ export class InventoryService {
 
   /**
    * Obtener producto por ID desde el catálogo público
+   * MEJORADO: Con validaciones estrictas para garantizar que stockActual está presente
    */
   async getProductoById(idProducto: number, accessToken?: string): Promise<any> {
     try {
       // Usa ruta pública del catálogo (no requiere autenticación)
       const response = await this.axiosInstance.get(`/catalogo/${idProducto}`);
-      return response.data?.data ?? response.data;
+      
+      // VALIDACIÓN 1: Verificar que la estructura de respuesta es correcta
+      if (!response.data?.data || !response.data.data.hasOwnProperty('idProducto')) {
+        console.error(
+          `[InventoryService] Respuesta inválida para producto ${idProducto}:`,
+          JSON.stringify(response.data).substring(0, 200)
+        );
+        throw new Error(`Respuesta inválida del servidor de inventario para producto ${idProducto}`);
+      }
+      
+      // VALIDACIÓN 2: Verificar que el producto tenga stockActual (crítico)
+      const producto = response.data.data;
+      if (producto.stockActual === undefined || producto.stockActual === null) {
+        console.error(
+          `[InventoryService] Producto ${idProducto} sin stockActual. Producto:`,
+          JSON.stringify(producto).substring(0, 300)
+        );
+        throw new Error(`Stock no disponible para producto ${idProducto}`);
+      }
+      
+      // VALIDACIÓN 3: Verificar que stockActual es un número válido
+      if (typeof producto.stockActual !== 'number' || producto.stockActual < 0) {
+        console.error(
+          `[InventoryService] Producto ${idProducto} con stockActual inválido: ${producto.stockActual}`
+        );
+        throw new Error(`Stock inválido para producto ${idProducto}`);
+      }
+      
+      // VALIDACIÓN 4: Verificar que activo es booleano
+      if (typeof producto.activo !== 'boolean') {
+        console.warn(`[InventoryService] Producto ${idProducto} con 'activo' en tipo incorrecto, corrigiendo...`);
+        producto.activo = Boolean(producto.activo);
+      }
+      
+      console.debug(
+        `[InventoryService] ✅ Producto obtenido: ID=${producto.idProducto}, ` +
+        `Nombre=${producto.nombre}, Stock=${producto.stockActual}, Activo=${producto.activo}`
+      );
+      return producto;
+      
     } catch (error: any) {
+      // Si es 404, el producto no existe
       if (error.response?.status === 404) {
+        console.warn(`[InventoryService] Producto ${idProducto} no encontrado (404)`);
         return null;
       }
-      console.error(`Error al obtener producto ${idProducto}:`, error.message);
-      throw new Error(`No se pudo obtener el producto: ${error.message}`);
+      
+      // Si es otro error, loguear y relanzar
+      console.error(
+        `[InventoryService] ❌ Error al obtener producto ${idProducto}:`,
+        error.message
+      );
+      throw error instanceof Error 
+        ? error 
+        : new Error(`No se pudo obtener el producto ${idProducto}: ${error.message}`);
     }
   }
 
@@ -104,8 +144,7 @@ export class InventoryService {
   }
 
   /**
-   * Reducir stock de un producto (reservar inventario)
-   * TODO: Este método debe ser implementado en MS1 Inventory Service
+   * Reducir stock de un producto (llamada interna)
    * 
    * @param idProducto - ID del producto
    * @param cantidad - Cantidad a reducir del stock
@@ -127,27 +166,12 @@ export class InventoryService {
           { cantidadCambio: -Math.abs(cantidad) },
           { headers }
         );
-        return;
       }
-
-      if (accessToken) {
-        headers['Authorization'] = `Bearer ${accessToken}`;
-        await this.axiosInstance.patch(
-          `/products/${idProducto}/stock`,
-          { cantidadCambio: -Math.abs(cantidad) },
-          { headers }
-        );
-        return;
-      }
-
-      throw new Error('No hay token disponible para reducir stock');
-      
     } catch (error: any) {
-      if (error.response?.status === 400) {
-        throw new Error(`Stock insuficiente para el producto ${idProducto}`);
-      }
       console.error(`Error al reducir stock del producto ${idProducto}:`, error.message);
       throw new Error(`No se pudo reducir el stock: ${error.message}`);
     }
   }
 }
+
+export default InventoryService;
