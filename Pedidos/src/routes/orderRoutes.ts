@@ -51,6 +51,15 @@ router.get(
 	orderController.getCart
 );
 
+/** CU035 - Confirmar pedido del cliente (cliente) */
+router.post(
+	"/confirm",
+	authenticateToken,
+	requireUsuarioActivo,
+	requireRoles(TipoUsuario.cliente),
+	orderController.confirmOrder
+);
+
 /** CU48 - Crear pedido presencial o para llevar (empleado, administrador) */
 router.post(
 	"/create-customer-order",
@@ -141,6 +150,24 @@ router.get(
 	orderController.checkOrderStatus
 );
 
+/** Descargar comprobante de pago por ID de pedido (cliente) */
+router.get(
+	"/:idPedido/receipt",
+	authenticateToken,
+	requireUsuarioActivo,
+	requireRoles(TipoUsuario.cliente, TipoUsuario.empleado, TipoUsuario.administrador),
+	orderController.downloadReceiptByOrder
+);
+
+/** CU033 - Consultar detalle completo de un pedido (cliente) */
+router.get(
+	"/:idPedido/detail",
+	authenticateToken,
+	requireUsuarioActivo,
+	requireRoles(TipoUsuario.cliente),
+	orderController.getCustomerOrderDetail
+);
+
 /** Obtener detalles de un pedido por ID (empleado, administrador) */
 router.get(
 	"/:idPedido",
@@ -157,15 +184,6 @@ router.patch(
 	requireUsuarioActivo,
 	requireRoles(TipoUsuario.empleado, TipoUsuario.administrador),
 	orderController.updateOrderProductQuantity
-);
-
-/** CU033 - Consultar detalle completo de un pedido (cliente) */
-router.get(
-	"/:idPedido/detail",
-	authenticateToken,
-	requireUsuarioActivo,
-	requireRoles(TipoUsuario.cliente),
-	orderController.getCustomerOrderDetail
 );
 
 /** CU38 - Cambiar estado de un pedido (empleado, administrador) */

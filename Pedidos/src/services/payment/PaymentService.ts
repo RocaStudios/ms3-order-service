@@ -15,6 +15,7 @@ import { Op } from "sequelize";
 import { ServiceResult } from "../../types/pedido.types";
 import { sequelizeInstance } from "../../config/db";
 import { Transaction } from "sequelize";
+import { AppError } from "../../middlewares/error.middleware";
 
 /**
  * PaymentService - Handles payment operations
@@ -420,14 +421,20 @@ export class PaymentService {
    */
   async listPendingPaymentOrders(
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    idUsuario?: number
   ): Promise<{ pedidos: Pedido[]; total: number }> {
     const offset = (page - 1) * limit;
+    const whereClause: any = {
+      estado: 'sin_confirmar'
+    };
+
+    if (idUsuario) {
+      whereClause.idUsuario = idUsuario;
+    }
 
     const { rows: pedidos, count: total } = await this.pedidoRepository.findAndCountAll({
-      where: {
-        estado: 'sin_confirmar'
-      },
+      where: whereClause,
       order: [['fechaPedido', 'DESC']],
       limit,
       offset
@@ -579,6 +586,7 @@ export class PaymentService {
       fechaFin?: Date;
       idMetodoPago?: number;
       estado?: string;
+      idUsuario?: number;
     }
   ): Promise<{ pagos: Pago[]; total: number }> {
     const whereClausePago: any = {};
@@ -602,6 +610,10 @@ export class PaymentService {
       whereClausePedido.estado = filtros.estado;
     }
 
+    if (filtros.idUsuario) {
+      whereClausePedido.idUsuario = filtros.idUsuario;
+    }
+
     const offset = (page - 1) * limit;
 
     const pagos = await this.pagoRepository.findAllWithRelations(whereClausePago, whereClausePedido);
@@ -622,11 +634,41 @@ export class PaymentService {
    */
   async getPaymentDetail(idPago: number): Promise<Pago> {
     const pago = await this.pagoRepository.findByIdWithRelations(idPago);
-
     if (!pago) {
-      throw new Error("Pago no encontrado");
+      throw new AppError(`Pago con ID ${idPago} no encontrado`, 404);
+    }
+    return pago;
+  }
+
+  async getReceiptByOrderId(idPedido: number, idUsuario: number): Promise<{ pago: Pago; path: string }> {
+    const pagos = await this.pagoRepository.findByPedido(idPedido);
+    if (!pagos || pagos.length === 0) {
+      throw new AppError(`No se encontró ningún pago para el pedido ${idPedido}`, 404);
     }
 
-    return pago;
+    const pago = pagos.find(p => p.idPedido === idPedido) || pagos[0];
+    
+    const pedido = await this.pedidoRepository.findById(idPedido);
+    if (!pedido) {
+      throw new AppError(`Pedido con ID ${idPedido} no encontrado`, 404);
+    }
+
+    if (pedido.idUsuario !== idUsuario) {
+      throw new AppError(`No tienes permiso para acceder a este comprobante`, 403);
+    }
+
+    if (!pago.urlComprobante) {
+      throw new AppError(`El pago no tiene comprobante generado`, 404);
+    }
+
+    const fs = require('fs');
+    const path = require('path');
+    const rutaArchivo = path.resolve(pago.urlComprobante);
+
+    if (!fs.existsSync(rutaArchivo)) {
+      throw new AppError(`Archivo de comprobante no encontrado`, 404);
+    }
+
+    return { pago, path: rutaArchivo };
   }
 }

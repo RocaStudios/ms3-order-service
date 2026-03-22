@@ -4,6 +4,7 @@ import { ListAllOrdersFilters } from "../../domain/repositories/pedidoRepository
 import { Pedido } from "../../domain/models/pedido";
 import { ProductoPedido } from "../../domain/models/productoPedido";
 import { ServiceResult } from "../../types/pedido.types";
+import { Op } from "sequelize";
 
 /**
  * OrderQueryService - Handles order queries and history
@@ -52,13 +53,13 @@ export class OrderQueryService {
   ): Promise<{ orders: Pedido[]; total: number }> {
     const whereConditions: any = { 
       idUsuario,
-      estado: { $ne: 'sin_confirmar' }
+      estado: { [Op.ne]: 'sin_confirmar' }
     };
 
     if (filtros?.fechaInicio && filtros?.fechaFin) {
       whereConditions.fechaPedido = {
-        $gte: filtros.fechaInicio,
-        $lte: filtros.fechaFin
+        [Op.gte]: filtros.fechaInicio,
+        [Op.lte]: filtros.fechaFin
       };
     }
 

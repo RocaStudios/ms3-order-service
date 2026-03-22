@@ -63,3 +63,29 @@ export async function initializeDB() {
 
   return sequelize;
 }
+
+/**
+ * Seed de métodos de pago
+ * Crea los métodos de pago básicos si no existen
+ */
+export async function seedMetodosPago() {
+  try {
+    const metodosExistentes = await MetodoPago.count();
+    
+    if (metodosExistentes > 0) {
+      console.log(`✅ Métodos de pago ya existen (${metodosExistentes} registros)`);
+      return;
+    }
+
+    const metodos = [
+      { nombre: 'Efectivo' },
+      { nombre: 'Transferencia' },
+      { nombre: 'Tarjeta' }
+    ];
+
+    await MetodoPago.bulkCreate(metodos);
+    console.log(`✅ Seed de métodos de pago creado: ${metodos.map(m => m.nombre).join(', ')}`);
+  } catch (error) {
+    console.error("❌ Error en seed de métodos de pago:", error);
+  }
+}

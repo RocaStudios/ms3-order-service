@@ -14,6 +14,7 @@ import { Pago } from "../../domain/models/pago";
 import { ServiceResult } from "../../types/pedido.types";
 import { sequelizeInstance } from "../../config/db";
 import { Transaction } from "sequelize";
+import { AppError } from "../../middlewares/error.middleware";
 
 export interface ConfirmOrderData {
   direccionEntrega?: string;
@@ -531,44 +532,45 @@ export class OrderService {
     const pedido = await this.pedidoRepository.findById(idPedido);
 
     if (!pedido) {
-      throw new Error("El pedido seleccionado no existe o fue eliminado");
+      throw new AppError("El pedido seleccionado no existe o fue eliminado", 404);
     }
 
     const estadoActual = pedido.estado;
 
     const estadosValidos = ['sin_confirmar', 'pendiente', 'entregado', 'cancelado'];
     if (!estadosValidos.includes(nuevoEstado)) {
-      throw new Error("Estado no válido");
+      throw new AppError("Estado no válido", 400);
     }
 
     if (estadoActual === 'entregado') {
-      throw new Error("El pedido ya está en estado 'Entregado'. No se permiten modificaciones adicionales");
+      throw new AppError("El pedido ya está en estado 'Entregado'. No se permiten modificaciones adicionales", 400);
     }
 
     if (estadoActual === 'cancelado') {
-      throw new Error("El pedido ya está cancelado. No se permiten modificaciones adicionales");
+      throw new AppError("El pedido ya está cancelado. No se permiten modificaciones adicionales", 400);
     }
 
     const transicionesValidas: { [key: string]: string[] } = {
-      'sin_confirmar': ['pendiente', 'cancelado'],
+      'sin_confirmar': ['pendiente', 'entregado', 'cancelado'],
       'pendiente': ['entregado', 'cancelado'],
       'entregado': [],
       'cancelado': []
     };
 
     if (!transicionesValidas[estadoActual]?.includes(nuevoEstado)) {
-      throw new Error(
-        `Transición de estado no permitida: no se puede cambiar de '${estadoActual}' a '${nuevoEstado}'`
+      throw new AppError(
+        `Transición de estado no permitida: no se puede cambiar de '${estadoActual}' a '${nuevoEstado}'`,
+        400
       );
     }
 
-    if (nuevoEstado === 'pendiente') {
+    if (nuevoEstado === 'pendiente' && pedido.canalVenta !== 'web') {
       const pago = await this.pagoRepository.findOne({
         where: { idPedido }
       });
 
       if (!pago) {
-        throw new Error("El pedido debe tener un pago registrado para poder marcarse como pendiente");
+        throw new AppError("El pedido debe tener un pago registrado para poder marcarse como pendiente", 400);
       }
     }
 

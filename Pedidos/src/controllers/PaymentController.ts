@@ -5,6 +5,7 @@ import { PaymentMapper } from "../domain/mappers/paymentMapper";
 import { extractToken } from "../utils/tokenExtractor";
 import { PaginationMetaDto } from "../domain/dtos/response/PaginatedResponseDto";
 import { ApiResponse } from "../types";
+import { TipoUsuario } from "../types/express";
 
 /**
  * PaymentController - Handles HTTP requests for payments
@@ -19,8 +20,9 @@ export class PaymentController {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
+      const idUsuario = req.user?.tipoUsuario === TipoUsuario.cliente ? req.user.id : undefined;
 
-      const { pedidos, total } = await paymentService.listPendingPaymentOrders(page, limit);
+      const { pedidos, total } = await paymentService.listPendingPaymentOrders(page, limit, idUsuario);
 
       const pagination: PaginationMetaDto = {
         page,
@@ -281,6 +283,10 @@ export class PaymentController {
 
       if (estado) {
         filtros.estado = estado as string;
+      }
+
+      if (req.user?.tipoUsuario === TipoUsuario.cliente) {
+        filtros.idUsuario = req.user.id;
       }
 
       const { pagos, total } = await paymentService.getPaymentHistory(page, limit, filtros);

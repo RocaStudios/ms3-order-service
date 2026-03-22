@@ -9,11 +9,14 @@ const PORT = process.env.PORT;
 async function startServer() {
   // Inicializar Base de Datos y sincronizar modelos en desarrollo
   try {
-    const { initializeDB } = await import("./config/db");
+    const { initializeDB, seedMetodosPago } = await import("./config/db");
     const sequelize = await initializeDB();
     if (process.env.NODE_ENV !== "production") {
       await sequelize.sync({ alter: true });
       console.log("✅ Modelos sincronizados con la base de datos");
+      
+      // Ejecutar seed de métodos de pago
+      await seedMetodosPago();
     }
   } catch (err) {
     console.error("❌ Error inicializando la base de datos:", err);

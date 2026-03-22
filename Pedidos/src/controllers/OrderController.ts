@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { cartService, orderService, orderQueryService } from "../services/serviceInstances";
+import { cartService, orderService, orderQueryService, paymentService } from "../services/serviceInstances";
 import { OrderValidator } from "../utils/orderValidator";
 import { OrderMapper } from "../domain/mappers/orderMapper";
 import { extractToken } from "../utils/tokenExtractor";
@@ -925,6 +925,27 @@ export class OrderController {
       };
 
       res.status(resultado.status).json(response);
+    } catch (error: any) {
+      next(error);
+    }
+  };
+
+  downloadReceiptByOrder = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const idPedido = OrderValidator.validateIntegerId(req.params.idPedido, "ID de pedido", res);
+      if (!idPedido) return;
+
+      const idUsuario = OrderValidator.validateAuthenticatedUser(req, res);
+      if (!idUsuario) return;
+
+      const { pago, path } = await paymentService.getReceiptByOrderId(idPedido, idUsuario);
+
+      const fs = require('fs');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=comprobante-pedido-${idPedido}.pdf`);
+      
+      const fileStream = fs.createReadStream(path);
+      fileStream.pipe(res);
     } catch (error: any) {
       next(error);
     }

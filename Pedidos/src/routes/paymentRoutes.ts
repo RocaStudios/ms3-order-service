@@ -38,7 +38,7 @@ router.get(
   "/history",
   authenticateToken,
   requireUsuarioActivo,
-  requireRoles(TipoUsuario.empleado, TipoUsuario.administrador),
+  requireRoles(TipoUsuario.cliente, TipoUsuario.empleado, TipoUsuario.administrador),
   paymentController.getPaymentHistory
 );
 
