@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { paymentService } from "../services/serviceInstances";
+import { mercadoPagoCheckoutService, paymentService } from "../services/serviceInstances";
 import { OrderValidator } from "../utils/orderValidator";
 import { PaymentMapper } from "../domain/mappers/paymentMapper";
 import { extractToken } from "../utils/tokenExtractor";
@@ -12,6 +12,46 @@ import { TipoUsuario } from "../types/express";
  * Uses DI Container, Validators, and Mappers for clean separation
  */
 export class PaymentController {
+  /**
+   * Crear preferencia de checkout de MercadoPago (solo cliente)
+   * POST /api/payments/mercadopago/preference/:idPedido
+   */
+  createMercadoPagoPreference = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const idPedido = OrderValidator.validateIntegerId(req.params.idPedido, "ID de pedido", res);
+      if (!idPedido) return;
+
+      if (!req.user || req.user.tipoUsuario !== TipoUsuario.cliente) {
+        res.status(403).json({
+          success: false,
+          message: "Solo los clientes pueden iniciar checkout de MercadoPago"
+        });
+        return;
+      }
+
+      const result = await mercadoPagoCheckoutService.createPreferenceForClient(idPedido, req.user.id);
+
+      if (!result.ok) {
+        res.status(result.status).json({
+          success: false,
+          message: result.message,
+          data: null,
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+
+      res.status(201).json({
+        success: true,
+        message: "Preferencia de MercadoPago creada exitosamente",
+        data: result.data,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  };
+
   /**
    * CU39 - List pending payment orders with pagination
    * GET /api/payments/pending-orders?page=1&limit=20

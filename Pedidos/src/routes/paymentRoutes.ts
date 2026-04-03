@@ -87,6 +87,15 @@ router.post(
   paymentController.registerPayment
 );
 
+/** Crear preferencia de checkout MercadoPago (solo cliente) */
+router.post(
+  "/mercadopago/preference/:idPedido",
+  authenticateToken,
+  requireUsuarioActivo,
+  requireRoles(TipoUsuario.cliente),
+  paymentController.createMercadoPagoPreference
+);
+
 /** CU041 - Obtener información detallada de un pago */
 router.get(
   "/:idPago",

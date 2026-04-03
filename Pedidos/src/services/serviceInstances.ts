@@ -17,6 +17,7 @@ import { CartService } from "./cart/CartService";
 import { OrderService } from "./order/OrderService";
 import { OrderQueryService } from "./order/OrderQueryService";
 import { PaymentService } from "./payment/PaymentService";
+import { MercadoPagoCheckoutService } from "./payment/MercadoPagoCheckoutService";
 
 // Repositorios
 const pedidoRepository = new PedidoRepository();
@@ -69,4 +70,8 @@ export const paymentService = new PaymentService(
   inventoryService,
   clientService,
   priceCalculatorService
+);
+
+export const mercadoPagoCheckoutService = new MercadoPagoCheckoutService(
+  pedidoRepository
 );

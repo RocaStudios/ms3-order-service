@@ -1,3 +1,4 @@
+console.log("🚀 [SERVER-TRACE] Iniciando server.ts...");
 import dotenv from 'dotenv';
 dotenv.config();
 
